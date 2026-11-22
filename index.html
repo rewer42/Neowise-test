@@ -1,3 +1,4 @@
+
 <!doctype html>
 <html lang="ru">
 <head>
@@ -7,30 +8,121 @@
   <style>
     body { max-width: 40rem; margin: 2rem auto; padding: 0 1rem; font: 1rem/1.5 system-ui, sans-serif; }
     textarea { box-sizing: border-box; display: block; width: 100%; margin: .5rem 0; padding: .5rem; font: inherit; }
-    button { padding: .4rem .8rem; font: inherit; }
+    button { padding: .4rem .8rem; font: inherit; cursor: pointer; }
     pre { white-space: pre-wrap; }
+    #result { margin-top: 1rem; }
+    .error { color: #a12622; }
+    .success { color: #176b36; }
   </style>
 </head>
 <body>
-  <h1>Входящие заявки</h1>
-  <form>
-    <label for="message">Текст заявки</label>
-    <textarea id="message" rows="4"></textarea>
-    <button type="submit">Разобрать заявку</button>
-  </form>
-  <pre id="result" aria-live="polite"></pre>
-  <script type="module">
-    const form = document.querySelector("form");
-    const result = document.querySelector("#result");
-    form.addEventListener("submit", async (event) => {
-      event.preventDefault();
+<h1>Входящие заявки</h1>
+
+<form>
+  <label for="message">Текст заявки</label>
+  <textarea id="message" rows="4"></textarea>
+  <button type="submit">Разобрать заявку</button>
+</form>
+
+<section id="result" aria-live="polite" hidden>
+  <p id="status"></p>
+  <div id="details" hidden>
+    <p><strong>Тема:</strong> <span id="topic"></span></p>
+    <p><strong>Черновик ответа:</strong></p>
+    <pre id="draft"></pre>
+  </div>
+</section>
+
+<script type="module">
+  const form = document.querySelector("form");
+  const message = document.querySelector("#message");
+  const button = form.querySelector("button");
+
+  const result = document.querySelector("#result");
+  const status = document.querySelector("#status");
+  const details = document.querySelector("#details");
+  const topic = document.querySelector("#topic");
+  const draft = document.querySelector("#draft");
+
+  const topicNames = {
+    delivery: "Доставка",
+    pricing: "Стоимость",
+    other: "Другое",
+  };
+
+  function showMessage(text, type = "") {
+    result.hidden = false;
+    status.textContent = text;
+    status.className = type;
+    details.hidden = true;
+    topic.textContent = "";
+    draft.textContent = "";
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const text = message.value.trim();
+
+    if (!text) {
+      showMessage("Введите текст заявки.", "error");
+      message.focus();
+      return;
+    }
+
+    button.disabled = true;
+    showMessage("Заявка обрабатывается...");
+
+    try {
       const reply = await fetch("/api/triage", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: document.querySelector("#message").value }),
+        body: JSON.stringify({ text }),
       });
-      result.textContent = JSON.stringify(await reply.json(), null, 2);
-    });
-  </script>
+
+      const data = await reply.json();
+
+      if (data.status === "manual_review") {
+        showMessage(
+                "Не удалось автоматически разобрать заявку. Необходима ручная обработка.",
+                "error"
+        );
+        return;
+      }
+
+      if (!reply.ok || data.status !== "ready") {
+        showMessage("Ошибка обработки заявки.", "error");
+        return;
+      }
+
+      if (
+              !topicNames[data.topic] ||
+              typeof data.draft !== "string" ||
+              !data.draft.trim()
+      ) {
+        showMessage(
+                "Получен некорректный результат. Необходимо обработать заявку вручную.",
+                "error"
+        );
+        return;
+      }
+
+      status.textContent = "Заявка успешно разобрана.";
+      status.className = "success";
+
+      topic.textContent = topicNames[data.topic];
+      draft.textContent = data.draft;
+      details.hidden = false;
+
+    } catch {
+      showMessage(
+              "Не удалось связаться с сервером.",
+              "error"
+      );
+    } finally {
+      button.disabled = false;
+    }
+  });
+</script>
 </body>
 </html>
